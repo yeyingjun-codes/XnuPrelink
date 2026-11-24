@@ -87,7 +87,8 @@ class Layout:
                     self.retained_code.append((segment['va'], segment['va'] + segment['filesize'], name))
         self.placements = {}
         self.cursor = align(max(len(cache.data), max(s['va'] + s['size'] - cache.base
-                                                  for s in cache.segments)))
+                                                  for s in cache.segments),
+                               max([0] + [end - cache.base for begin, end in self.occupied])))
         # Native __TEXT (the entry's header, constants and strings) goes into a hole of the original __PRELINK_TEXT. The linker
         # pads the segment to a 16 KiB multiple, and a retained kext may begin inside that padding: the hole only has to hold the
         # segment's sections, and the segment is then mapped as the whole 4 KiB pages below the next retained segment.
