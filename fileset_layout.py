@@ -159,7 +159,19 @@ class Layout:
 
     def allocate(self, size):
         address = self.cache.base + self.cursor
-        self.cursor = align(self.cursor + size)
+        # A retained kext may extend into the tail of the collection, where new
+        # segments are allocated. Skip past any retained segment that would
+        # overlap this allocation, then resume the cursor after the gap.
+        while True:
+            conflict = None
+            for begin, end in self.occupied:
+                if begin < address + size and end > address:
+                    conflict = end
+                    break
+            if conflict is None:
+                break
+            address = align(conflict)
+        self.cursor = address - self.cache.base + size
         return address
 
     def reserve(self, name, address):
