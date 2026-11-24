@@ -115,7 +115,13 @@ class Layout:
             raise ValueError('Native code would collide with collection data')
         self.roots.pop('__TEXT_BOOT_EXEC', None)
         code['size'] = code['filesize'] = code_end - code['va']
-        self.reserve('__DATA', self.roots['__DATA']['va'])
+        # Native __DATA must not sit on top of a retained kext's data. Place it after
+        # every retained segment inside the collection's __DATA window, the same way
+        # native code follows retained kext code above.
+        data_root = self.roots['__DATA']
+        data_end_kept = max([data_root['va']] + [end for begin, end in self.occupied
+                                                if data_root['va'] <= begin < data_root['va'] + data_root['size']])
+        self.reserve('__DATA', align(data_end_kept))
         link = self.roots['__LINKEDIT']
         for name in ('__LINKINFO', '__LINKEDIT'):
             self.reserve(name, self.allocate(self.segment(name)['size']))
