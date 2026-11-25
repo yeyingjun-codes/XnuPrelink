@@ -126,6 +126,10 @@ class Layout:
         data_end_kept = max([data_root['va']] + [end for begin, end in self.occupied
                                                 if data_root['va'] <= begin < data_root['va'] + data_root['size']])
         self.reserve('__DATA', align(data_end_kept))
+        # __DATA may have moved past the collection's original linkedit. New
+        # linkinfo/linkedit segments must follow the relocated writable data,
+        # not the collection's old EOF, or they land inside __DATA.
+        self.cursor = max(self.cursor, self.end('__DATA') - self.cache.base)
         link = self.roots['__LINKEDIT']
         for name in ('__LINKINFO', '__LINKEDIT'):
             self.reserve(name, self.allocate(self.segment(name)['size']))
