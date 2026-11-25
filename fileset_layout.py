@@ -77,12 +77,15 @@ class Layout:
         self.roots = {s['name']: dict(s) for s in cache.segments}
         self.occupied = []
         self.retained_code = []
+        self.occupied_by_segment = []
         for name, (_, offset) in cache.entries.items():
             if name == 'com.apple.kernel' or closure is not None and name not in closure:
                 continue
             for segment in Image(cache.data, offset).segments:
                 if segment['size'] and segment['name'] != '__LINKEDIT':
                     self.occupied.append((segment['va'], segment['va'] + segment['size']))
+                    self.occupied_by_segment.append((segment['va'], segment['va'] + segment['size'],
+                                                     name, segment['name']))
                 if segment['name'] == '__TEXT_EXEC' and segment['filesize']:
                     self.retained_code.append((segment['va'], segment['va'] + segment['filesize'], name))
         self.placements = {}
@@ -153,6 +156,12 @@ class Layout:
             address = self.end('__DATA') if segment['name'] == '__PRELINK_DATA' else self.end('__KLD')
             self.reserve(segment['name'], address)
         self.size = self.cursor
+        for segment in self.native.segments:
+            if segment['size']:
+                print(f'layout native {segment["name"]:20} {self.placements[segment["name"]]:#x}..'
+                      f'{self.end(segment["name"]):#x}', flush=True)
+        for begin, end, owner, retained in sorted(self.occupied_by_segment):
+            print(f'layout retained {owner} {retained} {begin:#x}..{end:#x}', flush=True)
         self.validate()
 
     def segment(self, name):
@@ -249,10 +258,20 @@ class Layout:
             begin, end = self.placements[segment['name']], self.end(segment['name'])
             if begin % PAGE:
                 raise ValueError('Unaligned native segment')
-            if any(begin < e and b < end for b, e in self.occupied + placed):
-                raise ValueError(f'Native {segment["name"]} overlaps a retained segment')
-            if not any(s['va'] <= begin and end <= s['va'] + s['size'] for s in self.roots.values()):
-                raise ValueError(f'Native {segment["name"]} is outside collection mappings')
+            conflicts = [(b, e, owner, retained) for b, e, owner, retained in self.occupied_by_segment
+                         if begin < e and b < end]
+            if conflicts:
+                b, e, owner, retained = conflicts[0]
+                raise ValueError(f'Native {segment["name"]} {begin:#x}..{end:#x} overlaps '
+                                 f'{owner} {retained} {b:#x}..{e:#x}')
+            if any(begin < e and b < end for b, e in placed):
+                raise ValueError(f'Native {segment["name"]} {begin:#x}..{end:#x} overlaps another native segment')
+            mappings = [name for name, s in self.roots.items()
+                        if s['va'] <= begin and end <= s['va'] + s['size']]
+            if not mappings:
+                roots = ', '.join(f'{name} {s["va"]:#x}..{s["va"] + s["size"]:#x}'
+                                  for name, s in self.roots.items() if s['size'])
+                raise ValueError(f'Native {segment["name"]} {begin:#x}..{end:#x} is outside collection mappings: {roots}')
             placed.append((begin, end))
         ordered = sorted((s['va'], s['va'] + s['size']) for s in self.roots.values() if s['size'])
         if any(a[1] > b[0] for a, b in zip(ordered, ordered[1:])):
