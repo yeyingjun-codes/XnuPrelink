@@ -290,16 +290,26 @@ class SegmentedEmit(Emit):
         struct.pack_into('<II', self.data, self.fileoff+16, len(rebuilt), len(commands))
         flags, = struct.unpack_from('<I', self.data, self.fileoff+24)
         struct.pack_into('<I', self.data, self.fileoff+24, flags | MH_DYLIB_IN_CACHE)
-        # corecrypto authenticates the relocated __text bytes in a fileset.
-        code = next(s for s in self.native.sections if s['segment'] == '__TEXT_EXEC' and s['name'] == '__text')
+        # A source-provider kernel has its own POST HMAC, which must cover the
+        # relocated __text. A prelinked-crypto kernel deliberately has no such
+        # field: the retained com.apple.kec.corecrypto is sealed separately in
+        # seal_components() from its original bytes. Do not invent a field or
+        # seal the native text for a provider that is not in it.
         seals = [s for s in self.native.sections if s['name'] == '__fips_hmacs']
+        self.report['native_post_hmac_sealed'] = False
+        if not seals:
+            self.report['corecrypto_hmac_sha256'] = None
+            return
         if len(seals) != 1 or seals[0]['size'] != 32:
-            raise ValueError('Expected one 32-byte corecrypto HMAC field')
+            raise ValueError(f'Expected one 32-byte corecrypto HMAC field, got '
+                             f'{[(s["segment"], s["size"]) for s in seals]}')
+        code = next(s for s in self.native.sections if s['segment'] == '__TEXT_EXEC' and s['name'] == '__text')
         code_at = self.layout.translate(code['va']) - self.cache.base
         digest = hmac.new(b'\0', self.data[code_at:code_at+code['size']], hashlib.sha256).digest()
         seal_at = self.layout.translate(seals[0]['va']) - self.cache.base
         self.data[seal_at:seal_at+32] = digest
         self.report['corecrypto_hmac_sha256'] = digest.hex()
+        self.report['native_post_hmac_sealed'] = True
 
     def seal_components(self):
         """Reseal original components whose FIPS HMAC covers __TEXT_EXEC,__text that branch rebinding changed.
