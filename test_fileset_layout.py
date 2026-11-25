@@ -172,6 +172,18 @@ class PlacementValidationTests(unittest.TestCase):
         layout.mapped = {}
         return layout
 
+    def test_allocation_starts_after_relocated_data(self):
+        layout = object.__new__(Layout)
+        layout.cache = SimpleNamespace(base=0)
+        layout.occupied = []
+        layout.mapped = {}
+        layout.placements = {'__DATA': 0xbb90000}
+        layout.native = SimpleNamespace(segments=[dict(name='__DATA', va=0, size=0x214000)])
+        layout.cursor = 0xbc58000  # original __LINKINFO fell inside __DATA
+        layout.cursor = max(layout.cursor, layout.end('__DATA') - layout.cache.base)
+        self.assertEqual(layout.cursor, 0xbda4000)
+        self.assertEqual(layout.allocate(0x48000), 0xbda4000)
+
     def test_reports_the_exact_native_and_retained_ranges(self):
         layout = self.layout(native_end=0x10000, retained_begin=0x8800, retained_end=0x9800)
         with self.assertRaisesRegex(ValueError,
