@@ -153,5 +153,40 @@ class TextPlacementTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'No room'):
             layout.hole('__PRELINK_TEXT', layout.used('__TEXT'))
 
+class PlacementValidationTests(unittest.TestCase):
+    def layout(self, native_end, retained_begin, retained_end):
+        layout = object.__new__(Layout)
+        layout.native = SimpleNamespace(segments=[
+            dict(name='__LINKINFO', va=0x1000, size=0x1000),
+            dict(name='__LASTDATA_CONST', va=0x2000, size=0)])
+        layout.placements = {'__LINKINFO': 0x8000, '__LASTDATA_CONST': 0x6000}
+        layout.roots = {'__LINKEDIT': dict(va=0x8000, size=native_end),
+                        '__DATA_CONST': dict(va=0x6000, size=0x1000)}
+        layout.occupied_by_segment = [(retained_begin, retained_end, 'kept.kext', '__DATA'),
+                                      (layout.roots['__DATA_CONST']['va'],
+                                       layout.roots['__DATA_CONST']['va'] + layout.roots['__DATA_CONST']['size'],
+                                       'kept.kext', '__DATA_CONST')]
+        layout.occupied = [(retained_begin, retained_end),
+                           (layout.roots['__DATA_CONST']['va'],
+                            layout.roots['__DATA_CONST']['va'] + layout.roots['__DATA_CONST']['size'])]
+        layout.mapped = {}
+        return layout
+
+    def test_reports_the_exact_native_and_retained_ranges(self):
+        layout = self.layout(native_end=0x10000, retained_begin=0x8800, retained_end=0x9800)
+        with self.assertRaisesRegex(ValueError,
+                                    r'__LINKINFO 0x8000\.\.0x9000 overlaps kept.kext __DATA 0x8800\.\.0x9800'):
+            layout.validate()
+
+    def test_nonoverlapping_retained_segment_is_accepted(self):
+        layout = self.layout(native_end=0x10000, retained_begin=0xa000, retained_end=0xb000)
+        layout.validate()
+
+    def test_outside_mapping_reports_the_available_roots(self):
+        layout = self.layout(native_end=0, retained_begin=0xa000, retained_end=0xb000)
+        with self.assertRaisesRegex(ValueError, r'outside collection mappings: __DATA_CONST 0x6000\.\.0x7000'):
+            layout.validate()
+
+
 if __name__ == '__main__':
     unittest.main()
