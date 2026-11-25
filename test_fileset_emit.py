@@ -185,5 +185,32 @@ class FilesetEmitTests(unittest.TestCase):
                     emit_images(b'cache', b'native', payload, [])
 
 
+class SegmentedPostSealTests(unittest.TestCase):
+    def emit_without_native_post_field(self):
+        from fileset_segmented import SegmentedEmit
+        emit = SegmentedEmit.__new__(SegmentedEmit)
+        emit.native = Image.__new__(Image)
+        emit.native.commands = []
+        emit.native.data = struct.pack('<8I', 0xfeedfacf, 0x100000c, 2, 2, 0, 0, 0, 0)
+        emit.native.sections = []
+        emit.data = bytearray(0x100)
+        emit.report = {}
+        emit.fileoff = 0
+        return emit
+
+    def test_prelinked_native_without_post_field_is_not_sealed(self):
+        emit = self.emit_without_native_post_field()
+        emit.patch_entry_header()
+        self.assertIsNone(emit.report['corecrypto_hmac_sha256'])
+        self.assertFalse(emit.report['native_post_hmac_sealed'])
+        self.assertTrue(struct.unpack_from('<I', emit.data, 24)[0] & MH_DYLIB_IN_CACHE)
+
+    def test_malformed_post_field_is_still_rejected(self):
+        emit = self.emit_without_native_post_field()
+        emit.native.sections = [dict(segment='__DATA', name='__fips_hmacs', size=16)]
+        with self.assertRaisesRegex(ValueError, '32-byte corecrypto HMAC'):
+            emit.patch_entry_header()
+
+
 if __name__ == '__main__':
     unittest.main()
